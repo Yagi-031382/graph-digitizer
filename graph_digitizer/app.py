@@ -1,19 +1,21 @@
 """GUI orchestration; extraction code supplies original-image pixel points."""
 import sys
+import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImageReader, QPixmap
+from PySide6.QtGui import QImageReader, QPixmap, QImage
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QDoubleSpinBox, QLineEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
-    QSplitter, QAbstractItemView, QTabWidget,
+    QSplitter, QAbstractItemView, QTabWidget, QSpinBox,
 )
 from .calibration import Calibration, KEYS
 from .data import make_frame, save_csv
 from .image_view import ImageView
 from .plot_view import PlotView
 from .comparison import ComparisonPage
+from .extraction import extract_curves
 
 
 class MainWindow(QMainWindow):
@@ -24,6 +26,8 @@ class MainWindow(QMainWindow):
         self.references = {}
         self.points = []
         self.image_path = None
+        self.image_rgb = None
+        self.candidates = []
         self.dirty = False
         self.view = ImageView()
         self.plot = PlotView()
@@ -51,6 +55,21 @@ class MainWindow(QMainWindow):
             button.clicked.connect(action)
             buttons.addWidget(button)
         layout.addLayout(buttons)
+        automatic = QHBoxLayout()
+        self.extract_button = QPushButton("曲線を自動検出")
+        self.extract_button.clicked.connect(self.detect_curves)
+        automatic.addWidget(self.extract_button)
+        automatic.addWidget(QLabel("途切れの接続距離 [px]"))
+        self.gap = QSpinBox()
+        self.gap.setRange(0, 100)
+        self.gap.setValue(12)
+        automatic.addWidget(self.gap)
+        self.candidate_combo = QComboBox()
+        automatic.addWidget(self.candidate_combo, 1)
+        apply_button = QPushButton("選択候補を取得点に反映")
+        apply_button.clicked.connect(self.apply_candidate)
+        automatic.addWidget(apply_button)
+        layout.addLayout(automatic)
         layout.addWidget(QLabel("モードを選び、画像を左クリックする。ホイールで拡大・縮小、スクロールバーで移動。"))
         layout.addWidget(self.mode)
         references_layout = QHBoxLayout()
@@ -127,6 +146,10 @@ class MainWindow(QMainWindow):
         self.references.clear()
         self.points.clear()
         self.image_path = Path(path)
+        rgb_image = image.convertToFormat(QImage.Format.Format_RGB888)
+        buffer = np.frombuffer(rgb_image.constBits(), dtype=np.uint8).reshape(rgb_image.height(), rgb_image.bytesPerLine())
+        self.image_rgb = buffer[:, :rgb_image.width()*3].reshape(rgb_image.height(), rgb_image.width(), 3).copy()
+        self.clear_candidates()
         self.view.set_image(QPixmap.fromImage(image))
         self.mode.setCurrentIndex(1)
         self.dirty = False
@@ -146,14 +169,52 @@ class MainWindow(QMainWindow):
             self.dirty = True
         else:
             self.references[mode] = (u, v)
+            self.clear_candidates()
             self.dirty = bool(self.points) or self.dirty
             # Advance to next reference, then enter curve mode.
             self.mode.setCurrentIndex((self.mode.currentIndex()+1) % self.mode.count())
         self.refresh()
 
     def calibration_changed(self):
+        self.clear_candidates()
         self.dirty = bool(self.points) or self.dirty
         self.refresh()
+
+    def clear_candidates(self):
+        self.candidates = []
+        self.candidate_combo.clear()
+
+    def detect_curves(self):
+        """Input: loaded image, calibrated bounds, gap in px. Output: candidates and first preview; None."""
+        try:
+            calibration = self.calibration()
+            if self.image_rgb is None:
+                raise ValueError("画像を読み込む必要がある。")
+            self.candidates = extract_curves(self.image_rgb, calibration, self.gap.value())
+        except (ValueError, RuntimeError) as error:
+            QMessageBox.warning(self, "自動検出エラー", str(error))
+            return
+        self.candidate_combo.clear()
+        for candidate in self.candidates:
+            self.candidate_combo.addItem(candidate.name)
+        if not self.candidates:
+            QMessageBox.information(self, "検出結果", "候補が見つからなかった。接続距離や基準点を確認し、手動取得も利用できる。")
+            return
+        self.apply_candidate()
+
+    def apply_candidate(self):
+        """Input: selected candidate. Output: replace current points after confirmation; None."""
+        index = self.candidate_combo.currentIndex()
+        if not 0 <= index < len(self.candidates):
+            return
+        if self.points and QMessageBox.question(self, "取得点の置き換え", "現在の取得点を選択候補で置き換えるか。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        self.points = list(self.candidates[index].points)
+        self.dirty = True
+        self.refresh()
+        self.statusBar().showMessage(f"{len(self.candidates)} 候補を検出した。画像上の点と再描画を確認してからCSV保存する。")
 
     def refresh(self):
         """Input: current references and px points. Output: None; update table and plot."""
