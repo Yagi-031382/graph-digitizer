@@ -18,3 +18,20 @@ class PlotView(FigureCanvasQTAgg):
         self.axes.set_ylabel(y_label)
         self.axes.grid(True)
         self.draw_idle()
+
+    def compare(self, curves, x_label, y_label, show_points=False):
+        """Input: (filename, x/y frame) pairs, labels, marker switch. Output: redraw; None."""
+        self.axes.clear()
+        from matplotlib import colormaps
+        palette = colormaps["tab20"]
+        count = len(curves)
+        for index, (name, frame) in enumerate(curves):
+            color = palette(index % 20) if count <= 20 else colormaps["hsv"](index / count)
+            self.axes.plot(frame["x"], frame["y"], label=name, color=color,
+                           linestyle="-", marker="o" if show_points else None, markersize=4)
+        self.axes.set_xlabel(x_label)
+        self.axes.set_ylabel(y_label)
+        self.axes.grid(True)
+        if curves:
+            self.axes.legend()
+        self.draw_idle()

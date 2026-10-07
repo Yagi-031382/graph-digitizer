@@ -7,18 +7,19 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QDoubleSpinBox, QLineEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
-    QSplitter, QAbstractItemView,
+    QSplitter, QAbstractItemView, QTabWidget,
 )
 from .calibration import Calibration, KEYS
 from .data import make_frame, save_csv
 from .image_view import ImageView
 from .plot_view import PlotView
+from .comparison import ComparisonPage
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("graph-digitizer — 手動グラフ抽出")
+        self.setWindowTitle("graph-digitizer — CSV取得・CSV描画")
         self.resize(1400, 900)
         self.references = {}
         self.points = []
@@ -86,7 +87,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([850, 550])
         layout.addWidget(splitter, 1)
-        self.setCentralWidget(central)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(central, "CSV取得")
+        self.comparison = ComparisonPage()
+        self.tabs.addTab(self.comparison, "CSV描画")
+        self.setCentralWidget(self.tabs)
         self.view.clicked.connect(self.on_image_click)
         self.refresh()
 
