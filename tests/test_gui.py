@@ -66,6 +66,36 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(window.points, [])
         window.close()
 
+    def test_selected_row_highlight_moves_recalibrates_and_clears(self):
+        from matplotlib.colors import to_rgba
+        from test_calibration import example
+        window = MainWindow()
+        calibration = example()
+        for key, value in calibration.values.items():
+            window.values[key].setValue(value)
+        window.references = dict(calibration.pixels)
+        window.points = [(100, 400), (300, 250), (500, 100)]
+        window.refresh()
+        self.assertFalse(window.plot.selection_marker.get_visible())
+        window.table.selectRow(1)
+        marker = window.plot.selection_marker
+        self.assertTrue(marker.get_visible())
+        self.assertEqual(marker.get_offsets().tolist(), [[20, 3]])
+        self.assertEqual(tuple(marker.get_facecolor()[0]), to_rgba("#ff8c00"))
+        window.table.selectRow(2)
+        self.assertEqual(marker.get_offsets().tolist(), [[40, 6]])
+        window.values["x_max"].setValue(80)
+        self.assertEqual(window.plot.selection_marker.get_offsets().tolist(), [[80, 6]])
+        window.table.clearSelection()
+        self.assertFalse(window.plot.selection_marker.get_visible())
+        window.table.selectRow(1)
+        window.remove_selected()
+        self.assertFalse(window.plot.selection_marker.get_visible())
+        self.assertEqual(window.points, [(100, 400), (500, 100)])
+        window.plot.draw()
+        window.dirty = False
+        window.close()
+
 
 if __name__ == "__main__":
     unittest.main()

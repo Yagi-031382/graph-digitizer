@@ -2,7 +2,7 @@
 import sys
 import numpy as np
 from pathlib import Path
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtGui import QImageReader, QPixmap, QImage
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.comparison, "CSV描画")
         self.setCentralWidget(self.tabs)
         self.view.clicked.connect(self.on_image_click)
+        self.table.itemSelectionChanged.connect(self.selection_changed)
         self.refresh()
 
     def calibration(self):
@@ -211,6 +212,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
+        self.table.clearSelection()
         self.points = list(self.candidates[index].points)
         self.dirty = True
         self.refresh()
@@ -228,24 +230,35 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             frame = None
             status = str(error)
+        blocker = QSignalBlocker(self.table)
         self.table.setHorizontalHeaderLabels(["u [px]", "v [px]", self.x_label.text(), self.y_label.text()])
         self.table.setRowCount(len(self.points))
         for row, (u, v) in enumerate(self.points):
             values = [u, v] + (list(frame.iloc[row]) if frame is not None else [None, None])
             for col, value in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem("—" if value is None else f"{value:.10g}"))
-        self.plot.update_plot(frame, self.x_label.text(), self.y_label.text())
+        blocker.unblock()
+        rows = self.table.selectionModel().selectedRows()
+        selected_index = rows[0].row() if rows else None
+        self.plot.update_plot(frame, self.x_label.text(), self.y_label.text(), selected_index)
         self.statusBar().showMessage(status)
+
+    def selection_changed(self):
+        """Input: table selection state. Output: highlight matching plot point orange; None."""
+        rows = self.table.selectionModel().selectedRows()
+        self.plot.select_point(rows[0].row() if rows else None)
 
     def remove_selected(self):
         row = self.table.currentRow()
         if 0 <= row < len(self.points):
+            self.table.clearSelection()
             self.points.pop(row)
             self.dirty = True
             self.refresh()
 
     def undo(self):
         if self.points:
+            self.table.clearSelection()
             self.points.pop()
             self.dirty = True
             self.refresh()
